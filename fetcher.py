@@ -9,6 +9,9 @@ import base64
 import itertools
 import sys
 import collections
+import solver
+
+sys.setrecursionlimit(100000000)
 
 base_url = "https://www.magiccardmarket.eu"
 
@@ -44,13 +47,18 @@ def parse_card_table(table):
         # print("{:20}{:30}{:15}{:5}{:10}".format(name, url, location, price, count))
 
         #print (unidecode(name), unidecode(price))
+        
+        if not name or not price: 
+            continue 
+
         res += [{
-            "name": "" if name is None else unidecode(name),
-            "price": "" if name is None else unidecode(price),
+            "name": "" if not name else unidecode(name),
+            "price": "" if not price else unidecode(price),
             "url": base_url + url,
             "location": location,
             "count": count
         }]
+
 
     return res
 
@@ -148,7 +156,7 @@ def fetch_seller(url):
 class ShippingCost:
     url = "https://www.magiccardmarket.eu/Help/Shipping_Costs"
 
-    ShippingDetail = collections.namedtuple("ShippingMethod", ["certified", "max_value", "max_weight", "stamp_price", "price"])
+    ShippingDetail = collections.namedtuple("ShippingMethod", ["name", "certified", "max_value", "max_weight", "stamp_price", "price"])
 
     def __init__(self, src, dst):
         self.source = src
@@ -162,32 +170,45 @@ class ShippingCost:
         soup = BeautifulSoup(response.text, "html.parser")
         table = soup.find("table", class_="MKMTable HelpShippingTable")
 
-        methods = collections.defaultdict(list)
+        methods = []
 
         for row in table.tbody.find_all("tr"):
-            name, *data = [cell.text for i, cell in enumerate(row.find_all(["th", "td"]))]
+            data = [cell.text for i, cell in enumerate(row.find_all(["th", "td"]))]
             
-            name = re.sub("[\(\[].*?[\)\]]", "", name)
+            # name = re.sub("[\(\[].*?[\)\]]", "", name)
 
             # print(name, file=sys.stderr)
 
-            if len(data) < 4: continue
+            if len(data) < 5: continue
             if data[-1] == "": continue
 
-            methods[name] += [cls.ShippingDetail(*data)]
-
-        methods = {name: sorted(data, key=lambda detail: float(detail.price[:-2].replace(",", "."))) for name, data in methods.items()}
+            methods += [cls.ShippingDetail(*data)]
         
         result = cls(src, dst)
         result.methods = methods
 
         return result
 
+    def groupby(self, f):
+        return itertools.groupby(sorted(self.methods, key=f), key=f)
+
+    def get_cheapest(self):
+        return [
+            
+                sorted(data, 
+                    key = lambda detail: int(detail.price.split()[0].replace(",", ""))
+                )[0]
+            
+            for weight, data in self.groupby(
+                lambda detail: int(detail.max_weight[:-2])
+            )
+        ]
+
     def __str__(self):
         return "Shiping({source} -> {destination}: {methods})".format(
             source = self.source,
             destination = self.destination,
-            methods = list(self.methods.keys())
+            methods = list([x.name for x in self.methods])
         ) 
 
 class ShippingManager:
@@ -236,11 +257,14 @@ class ShippingManager:
 
 manager = ShippingManager()
 
+# print(*manager.get("D", "SK", shorthands=True).get_cheapest(), sep="\n")
+
 want = [
-    ("Polluted Mire", 30),
-    ("Snuff Out", 30),
-    ("Bad Moon", 30)
+    # ("Polluted Mire", 4),
+    # ("Snuff Out", 4),
+    ("Bad Moon", 4)
 ]
+
 
 
 data = []
@@ -257,19 +281,6 @@ for name, amount in want:
     }]
 
 
-# for i, card1 in enumerate(data):
-#     s1 = {user["name"] for user in card1["sellers"]}
-    
-#     for card2 in data[i:]:
-#         s2 = {user["name"] for user in card2["sellers"]}
-        
-#         # print(s2 & s1)
-
-
-equations = []
-
-x = 1
-lastx = x
 
 class Varlist:
     def __init__(self):
@@ -283,80 +294,71 @@ class Varlist:
         return str(self)
 
 
-minimize = []
+vars = solver.Variables()
+
+objective = 0
+constraints = []
+
 sellers = collections.defaultdict(Varlist) 
 
 for card in data:
+    total = 0
+
     for seller in card["sellers"]:
-        equations += ["x{} <= {}".format(x, seller["count"])]
+        x = vars.int("x", seller)
         
         name = seller["name"]
         sellers[name].location = seller["location"]
-        sellers[name].variables += ["x" + str(x)]
+        sellers[name].variables += [x]
 
-        minimize += ["{} x{}".format(seller["price"].split()[0].replace(",", ""), x)]
+        constraints += [x <= seller["count"]]
+        objective += (seller["price"].split()[0].replace(",", "") * x)
+        total += x
 
-        x += 1 
+    constraints += [total == card["amount"]]
 
-    new = ""
-    
-    for i in range(lastx, x):
-        new += "x{} + ".format(i)
-
-    new = new[:-2] + "= " + str(card["amount"])
-    equations += [new]
-
-    lastx = x
 
 # for i in range(1, x):
-#     equations += ["x{} >= 0".format(i)]
+#     constraints += ["x{} >= 0".format(i)]
 
 here = "Slovakia"
 card_weight = 20
 
 # print(*sellers.items(), sep="\n")
 
-y = 1
 BIG = 9999
 
 for name, varlist in sellers.items():
-    vars = varlist.variables
+    variables = varlist.variables
     loc  = varlist.location
 
     shipping = manager.get(loc, here)
 
-    # TODO: select method
-
-    method = next(iter(shipping.methods.keys()))
-
     last_price  = 0
     last_count = 1
 
-    for cost in shipping.methods[method]:
+    for cost in shipping.get_cheapest():
         price = int(cost.price.split()[0].replace(",", ""))
 
-        minimize += ["{} y{}".format(price - last_price, y)]
-        equations += ["{} y{} - {} <= 0".format(last_count, y, " - ".join(vars))]
-        equations += ["{} y{} - {} >= {}".format(BIG, y, " - ".join(vars), 1 - last_count)]
+        y = vars.bool("y")
+
+        objective += ((price - last_price) * y)
+
+        constraints += [last_count * y  <= sum(variables)]
+        constraints += [BIG * y >= (1 - last_count) + sum(variables)]
 
         last_count = int(cost.max_weight.split()[0]) // card_weight + 1
         last_price = price
 
-        y += 1
 
-ints  = ["x{}".format(i) for i in range(1, x)]
-bools = ["y{}".format(i) for i in range(1, y)]
 
-print("min: ", "" + (" + ".join(minimize)), ";", sep="")
-print(";\n".join(equations) + ";")
+problem = solver.make_lp(objective, constraints, vars)
+file = "test2.mps"
+# solver.write_mps(problem, file)
+# res = solver.Gurobi().solve_mps(file)
+print(res)
 
-print("int {};".format(" ".join(ints)))
-print("bin {};".format(" ".join(bools)))
-
-print(len(equations), "constraints", file=sys.stderr)
-print(len(ints) + len(bools), "variables", file=sys.stderr)
-
-# print(*equations, sep="\n")
+# print(*constraints, sep="\n")
 
 # print(Shipping.fetch("IE", "SK"))
 
