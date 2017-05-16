@@ -28,15 +28,19 @@ Optimalizátor interne používa ÚCP riešiteľ na hľadanie riešenia, a potre
 
 Spúsťa sa z príkazového riadku ako `python optimize.py` s argumentami:
 
+
 pozičné argumenty:
+
   karty                 Karty na nakúpenia a ich počet vo formáte: počet karta
 
+
 voliteľné argumenty:
-  -h, --help            Ukáže nápomoc
-  -s , --solver         Riešiteľ na použitie k optimalizácii
-  -t, --timelimit       Časový limit na riešenie ÚCP problému
-  -c, --country         Krajina do ktorej sa karty posielajú
-  -f, --file            Načíta počet a názvy kariet zo súbora
-  -wmps                 Vypíšé mps problém do súbora
+
+* -h, --help            Ukáže nápomoc
+* -s , --solver         Riešiteľ na použitie k optimalizácii
+* -t, --timelimit       Časový limit na riešenie ÚCP problému
+* -c, --country         Krajina do ktorej sa karty posielajú
+* -f, --file            Načíta počet a názvy kariet zo súbora
+* -wmps                 Vypíšé mps problém do súbora
 
 
