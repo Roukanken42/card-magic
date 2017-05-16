@@ -9,7 +9,35 @@ import base64
 import itertools
 import sys
 import collections
+import timeit
+import time
+
 import solver
+
+
+# helper functions for timing 
+def _template_func(setup, func):
+    """Create a timer function. Used if the "statement" is a callable."""
+    def inner(_it, _timer, _func=func):
+        setup()
+        _t0 = _timer()
+        for _i in _it:
+            retval = _func()
+        _t1 = _timer()
+        return _t1 - _t0, retval
+    return inner
+
+timeit._template_func = _template_func
+
+timeit.template = """
+def inner(_it, _timer{init}):
+    {setup}
+    _t0 = _timer()
+    for _i in _it:
+        retval = {stmt}
+    _t1 = _timer()
+    return _t1 - _t0, retval
+"""
 
 sys.setrecursionlimit(100000000)
 
@@ -18,36 +46,31 @@ base_url = "https://www.magiccardmarket.eu"
 url = "https://www.magiccardmarket.eu/Products/Singles/Aether+Revolt/Glint-Sleeve+Siphoner"
 location_re = re.compile(r"showMsgBox\(this,'Item location: ([^']*)'\)")
 
-def parse_card_table(table):
+def parse_card_table(table, united=False):
+    """Parses html table to raw data"""
     res = []
 
     for row in table.find_all("tr"):
         if "class" in row.attrs:
             continue 
 
-        #print(str(row).encode("utf8"))
         for tag in row.contents:
             pass
-            #print (str(tag).encode("utf8"))
 
-        #print()
-        #print(str(row.contents[0].span.contents[2]).encode("utf8"))
-        #print()
 
-        name = row.contents[0].span.contents[2].string
-        url  = row.contents[0].span.contents[2].find("a")["href"]
+        # table looks differently in all expansion mode
+        namerow = 1 if united else 0
 
-        location = row.contents[0].span.contents[1].span["onmouseover"]
+        name = row.contents[namerow].span.contents[2].string
+        url  = row.contents[namerow].span.contents[2].find("a")["href"]
+
+        location = row.contents[namerow].span.contents[1].span["onmouseover"]
         location = location_re.match(location).group(1)
 
         price = row.find("td", class_= "st_price").div.div.string
 
-        count = int(row.contents[6].string)
+        count = int(row.contents[9 if united else 6].string)
 
-        # print("{:20}{:30}{:15}{:5}{:10}".format(name, url, location, price, count))
-
-        #print (unidecode(name), unidecode(price))
-        
         if not name or not price: 
             continue 
 
@@ -65,11 +88,18 @@ def parse_card_table(table):
 
 ajax_re = re.compile(r"jcp\('([^']*)'\+encodeURI\('([^']*)'\+moreArticlesForm.page.value\+'([^']*)'\)")
 
-def fetch_card(url):
+def fetch_card(url, united=False):
     print("Fetching", url, file=sys.stderr)
     with urllib.request.urlopen(url) as response:
         data = response.read()
         soup = BeautifulSoup(data, 'html.parser')
+
+        allExp = soup.find("a", class_ = "seeAllLink")
+        
+        if allExp:
+            href = "https://www.magiccardmarket.eu" + allExp["href"]
+            return fetch_card(href, united=True)
+
 
         name = soup.find("h1", class_ = "c-w nameHeader").text
 
@@ -90,6 +120,8 @@ def fetch_card(url):
                 print("{},".format(i), end=" ", file=sys.stderr)
                 sys.stderr.flush()
 
+                # forge AJAX requests
+
                 response = requests.post('https://www.magiccardmarket.eu/iajax.php', data={"args": newurl})
                 encoded = response.text[67:-31]
                 decoded = base64.b64decode(encoded).decode("utf8")
@@ -106,12 +138,13 @@ def fetch_card(url):
         
         res = []
         for table in tables:
-            res += parse_card_table(table)
+            res += parse_card_table(table, united=united)
 
         return res
     return []
 
 class Cardlist:
+    """Methods for fetching cardlists"""
     url_single = "https://www.magiccardmarket.eu/Products/Singles"
 
     def __init__(self):
@@ -154,6 +187,7 @@ def fetch_seller(url):
 
 
 class ShippingCost:
+    """Class representing shipping cost"""
     url = "https://www.magiccardmarket.eu/Help/Shipping_Costs"
 
     ShippingDetail = collections.namedtuple("ShippingMethod", ["name", "certified", "max_value", "max_weight", "stamp_price", "price"])
@@ -175,10 +209,6 @@ class ShippingCost:
         for row in table.tbody.find_all("tr"):
             data = [cell.text for i, cell in enumerate(row.find_all(["th", "td"]))]
             
-            # name = re.sub("[\(\[].*?[\)\]]", "", name)
-
-            # print(name, file=sys.stderr)
-
             if len(data) < 5: continue
             if data[-1] == "": continue
 
@@ -212,6 +242,7 @@ class ShippingCost:
         ) 
 
 class ShippingManager:
+    """Manager for on demand fetching of shipping costs"""
     def __init__(self):
         self._fetch_mapping()
         self._cached = {}
@@ -240,9 +271,11 @@ class ShippingManager:
             ).findChildren()
         }
 
-    def get(self, src, dst, shorthands=False):
-        if not shorthands:
+    def get(self, src, dst):
+        if src in self._mapping_origin:
             src = self._mapping_origin[src]
+        
+        if dst in self._mapping_destination:
             dst = self._mapping_destination[dst]
 
         target = (src, dst)
@@ -254,128 +287,131 @@ class ShippingManager:
         return self._cached[target]
 
 
-
 manager = ShippingManager()
 
-# print(*manager.get("D", "SK", shorthands=True).get_cheapest(), sep="\n")
+def fetch_problem(want, manager=manager):
+    data = []
 
-want = [
-    # ("Polluted Mire", 4),
-    # ("Snuff Out", 4),
-    ("Bad Moon", 4)
-]
+    for name, amount in want:
+        card_url = Cardlist.fetch_single(name = name)[0]["url"]
+        card_sellers = fetch_card(card_url)
 
+        data += [{
+            "name": name,
+            "url": card_url,
+            "sellers": card_sellers,
+            "amount": amount
+        }]
 
-
-data = []
-
-for name, amount in want:
-    card_url = Cardlist.fetch_single(name = name)[0]["url"]
-    card_sellers = fetch_card(card_url)
-
-    data += [{
-        "name": name,
-        "url": card_url,
-        "sellers": card_sellers,
-        "amount": amount
-    }]
+    return {"want": want, "data": data}
 
 
 
-class Varlist:
-    def __init__(self):
-        self.location = "UNK"
-        self.variables = []
+def transform_problem(problem, here, manager=manager):
+    """Transforms problem from raw data to constraints and variables"""
 
-    def __str__(self):
-        return "Varlist(loc: {}, vars: {})".format(self.location, self.variables)
+    want = problem["want"]
+    data = problem["data"]
 
-    def __repr__(self):
-        return str(self)
+    class Varlist:
+        def __init__(self):
+            self.location = "UNK"
+            self.variables = []
+
+        def __str__(self):
+            return "Varlist(loc: {}, vars: {})".format(self.location, self.variables)
+
+        def __repr__(self):
+            return str(self)
 
 
-vars = solver.Variables()
+    vars = solver.Variables()
 
-objective = 0
-constraints = []
+    objective = []
+    constraints = []
 
-sellers = collections.defaultdict(Varlist) 
+    sellers = collections.defaultdict(Varlist) 
 
-for card in data:
-    total = 0
+    i = 0
 
-    for seller in card["sellers"]:
-        x = vars.int("x", seller)
+    for card in data:
+        total = []
+
+        for seller in card["sellers"]:
+            seller["cardname"] = card["name"]
+            x = vars.int("x", seller)
+
+            name = seller["name"]
+            sellers[name].location = seller["location"]
+            sellers[name].variables += [x]
+
+            constraints += [solver.Constraint("S" + str(i), "L", 1 * x, rhs = seller["count"])]
+            objective += [(seller["price"].split()[0].replace(",", "") * x)]
+            total += [1 * x]
+
+            i += 1
+
+        constraints += [solver.Constraint("W" + str(i), "E", *total, rhs=card["amount"])]
+
+
+
+    card_weight = 5
+
+    BIG = 9999
+
+    for name, varlist in sellers.items():
+        variables = varlist.variables
+        variables = [-1 * var for var in variables]
+
+        loc  = varlist.location
+
+        shipping = manager.get(loc, here)
+
+        last_price = 0
+        last_count = 1
+
+        for cost in shipping.get_cheapest():
+            price = int(cost.price.split()[0].replace(",", ""))
+
+            y = vars.bool("y")
+
+            objective += [((price - last_price) * y)]
+
+            constraints += [solver.Constraint("C" + str(i), "L", last_count * y , *variables, rhs=0)]
+            constraints += [solver.Constraint("B" + str(i), "G", BIG * y , *variables, rhs= 1 - last_count)]
+
+            last_count = int(cost.max_weight.split()[0]) // card_weight + 1
+            last_price = price
+
+            i += 1
+
+    return ([solver.Constraint("R1", "N", *objective)] + constraints, vars)
+
+
+def solve(want, country, lpsolver, file, problem=None):
+    """Solves and prints the sollution"""
+    
+    if problem is None:
+        problem = fetch_problem(want, country)
+    
+    problem = transform_problem(problem, country)
+    solver.write_mps(problem, file)
+
+    print("Running {} ... ".format(type(lpsolver).__name__), end="", file=sys.stderr)
+
+    timing = timeit.Timer(lambda: lpsolver.solve_mps(file))
+    time, res = timing.timeit(number=1)
+
+    print(res[0], file=sys.stderr)
+    print("\n{}\n===============\n    time: {:>40}\n    sol : {:>40}\n".format(type(lpsolver).__name__, time, res[0]))
+
+    sol, vars = res
+    _, names = problem
+
+    for name, val in vars:
+        key = names.get_key(name)
         
-        name = seller["name"]
-        sellers[name].location = seller["location"]
-        sellers[name].variables += [x]
+        if not key:
+            continue
 
-        constraints += [x <= seller["count"]]
-        objective += (seller["price"].split()[0].replace(",", "") * x)
-        total += x
-
-    constraints += [total == card["amount"]]
-
-
-# for i in range(1, x):
-#     constraints += ["x{} >= 0".format(i)]
-
-here = "Slovakia"
-card_weight = 20
-
-# print(*sellers.items(), sep="\n")
-
-BIG = 9999
-
-for name, varlist in sellers.items():
-    variables = varlist.variables
-    loc  = varlist.location
-
-    shipping = manager.get(loc, here)
-
-    last_price  = 0
-    last_count = 1
-
-    for cost in shipping.get_cheapest():
-        price = int(cost.price.split()[0].replace(",", ""))
-
-        y = vars.bool("y")
-
-        objective += ((price - last_price) * y)
-
-        constraints += [last_count * y  <= sum(variables)]
-        constraints += [BIG * y >= (1 - last_count) + sum(variables)]
-
-        last_count = int(cost.max_weight.split()[0]) // card_weight + 1
-        last_price = price
-
-
-
-problem = solver.make_lp(objective, constraints, vars)
-file = "test2.mps"
-# solver.write_mps(problem, file)
-# res = solver.Gurobi().solve_mps(file)
-print(res)
-
-# print(*constraints, sep="\n")
-
-# print(Shipping.fetch("IE", "SK"))
-
-# s = "tdafm_ZFS%5DW%09%0Et%7Cv%60%7E_OoM%5B%5C%29%2C%27-%10%24%24%2B-%2A%2A%2A12755" + "," + str(9) + ",N;"  
-
-# response = requests.post('https://www.magiccardmarket.eu/iajax.php', data={"args": s})
-# print(response.text)
-# encoded = response.text[67:-31]
-# print(base64.b64decode(encoded))
-
-# fetch_card("https://www.magiccardmarket.eu/Products/Singles/Saviors+of+Kamigawa/Scroll+of+Origins")
-
-# cardlist = fetch_cardlist(url2)
-# fetch_cards(cardlist)
-
-# with open("out.json", "w") as out:
-#     out.write(json.dumps(cardlist, sort_keys=True, indent=4))
-# url3 = "https://www.magiccardmarket.eu/Users/Dragonegg"
-
-# fetch_seller(url3)
+        print("{:20} from {:30}: {:2}x {:5}".format(key["cardname"], key["name"], str(val), key["price"]), file=sys.stderr)
