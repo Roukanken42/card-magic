@@ -29,15 +29,15 @@ Simply call `python optimize.py` from command line / bash
 
 positional arguments:
 
-  cards                 Cards to buy and their quantities in format: amount card
+  `cards`:                 Cards to buy and their quantities in format: amount card
 
 optional arguments:
 
-* -h, --help            Show help message and exit
-* -s , --solver         Solver to use for optimizing
-* -t, --timelimit       Timelimit for solving ILP problem
-* -c, --country         Country to which ship cards
-* -f, --file            Read amount and card names from file
-* -wmps                 Write the mps problem to file
+* `-h, --help`:            Show help message and exit
+* `-s , --solver`:         Solver to use for optimizing
+* `-t, --timelimit`:       Timelimit for solving ILP problem
+* `-c, --country`:         Country to which ship cards
+* `-f, --file`:            Read amount and card names from file
+* `-wmps`:                 Write the mps problem to file
 
 
