@@ -20,7 +20,7 @@ Optimalizátor interne používa ÚCP riešiteľ na hľadanie riešenia, a potre
 * [SYMPHONY](https://projects.coin-or.org/SYMPHONY#DownloadandInstall)
 * [SCIP](http://scip.zib.de/#download) - je pod [ZIB akademickou licensiou](http://scip.zib.de/academic.txt)
 * GLPK - [binárka pre Windows](https://sourceforge.net/projects/winglpk/), [linux balíčky](https://en.wikibooks.org/wiki/GLPK/Linux_packages), alebo [kompilované zo zdrojového kódu](https://www.gnu.org/software/glpk/#TOCdownloading)
-* [lp_solve](https://sourceforge.net/projects/lpsolve/files/lpsolve/) - treba stiahnúť súbor /<verzia>/lp_solve_<verzia>_exe_<platform>, kde <verzia> je posledná verzia programu (najnovšia je 5.5.2.5)
+* [lp_solve](https://sourceforge.net/projects/lpsolve/files/lpsolve/) - treba stiahnúť súbor /verzia/lp_solve_verzia_exe_<platform>, kde verzia je posledná verzia programu (najnovšia je 5.5.2.5)
 * [Gurobi](http://www.gurobi.com/downloads/download-center) - komerčný riešiteľ, zadarmo pre akademické použitie
 
 

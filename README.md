@@ -19,7 +19,7 @@ Optimizer internaly uses ILP solver to optimize and you need at least one instal
 * [SYMPHONY](https://projects.coin-or.org/SYMPHONY#DownloadandInstall)
 * [SCIP](http://scip.zib.de/#download) - is under [ZIB academic license](http://scip.zib.de/academic.txt)
 * GLPK - [binary for Windows](https://sourceforge.net/projects/winglpk/), [linux packages](https://en.wikibooks.org/wiki/GLPK/Linux_packages), or [compile from source](https://www.gnu.org/software/glpk/#TOCdownloading)
-* [lp_solve](https://sourceforge.net/projects/lpsolve/files/lpsolve/) - download a /<version>/lp_solve_<version>_exe_<platform> file, where <version> is the lastest version (5.5.2.5 as of writing this)
+* [lp_solve](https://sourceforge.net/projects/lpsolve/files/lpsolve/) - download a /version/lp_solve_version_exe_platform file, where version is the lastest version (5.5.2.5 as of writing this)
 * [Gurobi](http://www.gurobi.com/downloads/download-center) - commercial program, free for academic use
 
 
